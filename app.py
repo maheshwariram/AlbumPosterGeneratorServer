@@ -124,10 +124,8 @@ def generate_poster():
     else:
         album_copyright = ""
 
-    # Download artwork
-    urllib.request.urlretrieve(album_artwork_link, 'albumartwork.jpg')
     # Open the artwork
-    albumart = Image.open('albumartwork.jpg')
+    albumart = Image.open(BytesIO(requests.get(album_artwork_link).content))
     # Create a new blank image
     poster = Image.new("RGB", (720, 960), color=(255, 255, 255))
     # Put artwork on blank image
