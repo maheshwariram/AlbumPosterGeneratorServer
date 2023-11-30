@@ -22,6 +22,7 @@ fonts = {
     "verybold": requests.get("https://files.elliotjarnit.dev/fonts/verybold.otf"),
 }
 
+
 def find_line_split(text):
     middle = len(text) // 2
     before = text.rfind(' ', 0, middle)
@@ -31,6 +32,7 @@ def find_line_split(text):
     else:
         middle = before
     return middle
+
 
 def get_colors(img):
     try:
@@ -60,6 +62,7 @@ def serve_pil_image(pil_img):
     img_io.seek(0)
     return send_file(img_io, mimetype='image/jpeg')
 
+
 def remove_featured(str):
     if (str.find("(") != -1):
         str = str.split("(")[0].strip()
@@ -74,6 +77,7 @@ def format_time(millis):
         seconds = "0" + seconds
 
     return minutes + ":" + seconds
+
 
 def create_track_list(linesoftracks, response):
     # Get the track list and track times
@@ -116,13 +120,13 @@ def generate_poster():
 
     # Get important details
     album_artwork_link = data["artwork"].replace('100x100bb.jpg',
-                                                        '600x600bb.jpg')
+                                                 '600x600bb.jpg')
     album_name = data["name"]
     album_year = str(data["year"])
     album_artist = data["artist"]
     album_tracklist = data["tracklist"]
-    if request.args.get("copyright") is not None:
-        album_copyright = request.args.get("copyright")
+    if data["copyright"] is not None:
+        album_copyright = data["copyright"]
     else:
         album_copyright = ""
 
@@ -160,7 +164,6 @@ def generate_poster():
             albumnametocompare = album_name[0]
         else:
             albumnametocompare = album_name[1]
-
 
         while length > 480 and cursize >= 25:
             font_name = ImageFont.truetype(BytesIO(fonts["verybold"].content), cursize)
@@ -216,7 +219,6 @@ def generate_poster():
     font_times = ImageFont.truetype(BytesIO(fonts["regular"].content), bestsize)
     tracklist = besttracks
     linesoftracks = bestlinesoftracks
-
 
     # Put album name on image
     if twolinesforalbum:
@@ -303,9 +305,15 @@ def generate_poster():
         curline += 1
         curx += (int(cursize / 2) + 5) * 2
 
+    if album_copyright != "":
+        # Add copyright info in corner
+        posterdraw.text((720 / 2, 960),
+                        album_copyright,
+                        font=font_copyright,
+                        fill=(0, 0, 0),
+                        anchor='md')
 
     return serve_pil_image(poster)
-
 
 
 if __name__ == '__main__':
