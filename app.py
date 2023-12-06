@@ -117,6 +117,9 @@ def convert_standard_to_resolution(location, resolution):
 def get_largest_resolution(albumart):
     width = albumart.size[0]
     largest_width = width + ((width / 10) * 2)
+    # Bandwidth saver
+    if largest_width > 1440:
+        largest_width = 1440
     # Calculate height with 3:4 ratio
     largest_height = largest_width * (4 / 3)
     return [largest_width, largest_height]
@@ -161,9 +164,9 @@ def generate_poster():
     else:
         image_resolution = get_largest_resolution(albumart)
 
-    wpercent = (convert_standard_to_resolution(600, image_resolution) / float(albumart.size[0]))
-    hsize = int((float(albumart.size[1]) * float(wpercent)))
-    albumart = albumart.resize((convert_standard_to_resolution(600, image_resolution), hsize), Image.Resampling.LANCZOS)
+    # Resize the artwork to the width of the poster
+    size = image_resolution[0] - ((image_resolution[0] / 10) * 2)
+    albumart.thumbnail((size, size), Image.Resampling.LANCZOS)
 
     # Create a new blank image
     poster = Image.new("RGB", (int(image_resolution[0]), int(image_resolution[1])), color=(255, 255, 255))
