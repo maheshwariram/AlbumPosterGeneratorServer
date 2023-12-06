@@ -178,8 +178,8 @@ def generate_poster():
         convert_standard_to_resolution(660, image_resolution),
         convert_standard_to_resolution(745, image_resolution)], fill=(0, 0, 0))
     # Calculate font size for large album names
-    length = 1000
-    cursize = 55
+    length = convert_standard_to_resolution(1000, image_resolution)
+    cursize = convert_standard_to_resolution(55, image_resolution)
     twolinesforalbum = False
     while length > convert_standard_to_resolution(480, image_resolution) and cursize >= convert_standard_to_resolution(25, image_resolution):
         font_name = ImageFont.truetype(BytesIO(fonts["verybold"].content), cursize)
@@ -189,8 +189,8 @@ def generate_poster():
 
     if cursize < convert_standard_to_resolution(25, image_resolution) and length > convert_standard_to_resolution(480, image_resolution):
         twolinesforalbum = True
-        length = 4000
-        cursize = 300
+        length = convert_standard_to_resolution(1000, image_resolution)
+        cursize = convert_standard_to_resolution(55, image_resolution)
 
         temp = []
         temp.append(album_name[:find_line_split(album_name)].strip())
@@ -227,7 +227,7 @@ def generate_poster():
     bestlinesoftracks = 0
 
     while True:
-        length = 1000
+        length = convert_standard_to_resolution(1000, image_resolution)
         cursize = int(convert_standard_to_resolution(17, image_resolution))
         while length > 600:
             cursize -= 1
