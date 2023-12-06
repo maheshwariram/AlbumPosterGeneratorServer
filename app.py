@@ -229,7 +229,7 @@ def generate_poster():
     while True:
         length = convert_standard_to_resolution(1000, image_resolution)
         cursize = int(convert_standard_to_resolution(17, image_resolution))
-        while length > 600:
+        while length > convert_standard_to_resolution(600, image_resolution):
             cursize -= 1
             font_tracks = ImageFont.truetype(BytesIO(fonts["regular"].content), cursize)
             font_times = ImageFont.truetype(BytesIO(fonts["regular"].content), cursize)
