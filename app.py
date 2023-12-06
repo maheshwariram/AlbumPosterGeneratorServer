@@ -103,10 +103,8 @@ def create_track_list(linesoftracks, response):
 
 
 def get_uncompressed_image(artwork600):
-    print(artwork600)
     artwork600 = artwork600.replace("https://is1-ssl.mzstatic.com/image/thumb/", "https://a5.mzstatic.com/us/r1000/0/")
     artwork600 = artwork600.replace("/600x600bb.jpg", "")
-    print(artwork600)
     return artwork600
 
 
@@ -165,7 +163,7 @@ def generate_poster():
         image_resolution = get_largest_resolution(albumart)
 
     # Resize the artwork to the width of the poster
-    size = image_resolution[0] - ((image_resolution[0] / 10) * 2)
+    size = image_resolution[0] - convert_standard_to_resolution(120, image_resolution)
     albumart.thumbnail((size, size), Image.Resampling.LANCZOS)
 
     # Create a new blank image
