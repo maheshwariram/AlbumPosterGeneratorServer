@@ -250,7 +250,13 @@ def generate_poster():
             bestlinesoftracks = linesoftracks
         linesoftracks += 1
         tracklist = create_track_list(linesoftracks, album_tracklist)
-        if linesoftracks > 9:
+
+        # Get height of tracklist
+        trackheight = 0
+        for i in range(0, len(tracklist) - 1):
+            bbox = font_tracks.getmask(tracklist[i]).getbbox()
+            trackheight += bbox[3] - bbox[1] + 5
+        if trackheight > convert_standard_to_resolution(200, image_resolution):
             break
 
     # Load best font
