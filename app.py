@@ -103,14 +103,23 @@ def create_track_list(linesoftracks, response):
 
 
 def get_uncompressed_image(artwork600):
+    print(artwork600)
     artwork600 = artwork600.replace("https://is1-ssl.mzstatic.com/image/thumb/", "https://a5.mzstatic.com/us/r1000/0/")
     artwork600 = artwork600.replace("/600x600bb.jpg", "")
+    print(artwork600)
     return artwork600
 
 
 def convert_standard_to_resolution(location, resolution):
     # Location is the pixel location on a 720x960 image
     return location * int(resolution[0]) / 720
+
+def get_largest_resolution(albumart):
+    width = albumart.size[0]
+    largest_width = width + ((width / 10) * 2)
+    # Calculate height with 3:4 ratio
+    largest_height = largest_width * (4 / 3)
+    return [largest_width, largest_height]
 
 
 @app.route('/generate', methods=['POST'])
@@ -141,17 +150,21 @@ def generate_poster():
     else:
         album_copyright = ""
 
+    # Open the artwork
+    albumart = Image.open(BytesIO(requests.get(album_artwork_link).content))
+
     if "resolution" in data:
         image_resolution = data["resolution"]
         image_resolution = image_resolution.split("x")
+        image_resolution[0] = int(image_resolution[0])
+        image_resolution[1] = int(image_resolution[1])
     else:
-        image_resolution = "1080x1440"
-        image_resolution = image_resolution.split("x")
+        image_resolution = get_largest_resolution(albumart)
 
-    # Open the artwork
-    albumart = Image.open(BytesIO(requests.get(album_artwork_link).content))
-    # Resize the artwork
-    albumart.thumbnail((convert_standard_to_resolution(600, image_resolution), convert_standard_to_resolution(600, image_resolution)), Image.Resampling.LANCZOS)
+    wpercent = (convert_standard_to_resolution(600, image_resolution) / float(albumart.size[0]))
+    hsize = int((float(albumart.size[1]) * float(wpercent)))
+    albumart = albumart.resize((convert_standard_to_resolution(600, image_resolution), hsize), Image.Resampling.LANCZOS)
+
     # Create a new blank image
     poster = Image.new("RGB", (int(image_resolution[0]), int(image_resolution[1])), color=(255, 255, 255))
     # Put artwork on blank image
