@@ -27,11 +27,18 @@ def find_line_split(text):
     middle = len(text) // 2
     before = text.rfind(' ', 0, middle)
     after = text.find(' ', middle + 1)
-    if before == -1 or (after != -1 and middle - before >= after - middle):
-        middle = after
+
+    if before == -1 and after == -1:
+        return middle
+    if before == -1:
+        return after
+    if after == -1:
+        return before
+
+    if middle - before < after - middle:
+        return before
     else:
-        middle = before
-    return middle
+        return after
 
 
 def get_colors(img):
@@ -185,7 +192,7 @@ def generate_poster():
     while length > convert_standard_to_resolution(480, image_resolution) and cursize >= convert_standard_to_resolution(25, image_resolution):
         font_name = ImageFont.truetype(BytesIO(fonts["verybold"].content), cursize)
         font_year = ImageFont.truetype(BytesIO(fonts["medium"].content), int(cursize / 2) + 5)
-        length = font_name.getlength(album_name) + font_year.getlength(album_year) + 77
+        length = font_name.getbbox(album_name)[2] + font_year.getbbox(album_year)[2] + 77
         cursize -= 1
 
     if cursize < convert_standard_to_resolution(25, image_resolution) and length > convert_standard_to_resolution(480, image_resolution):
@@ -193,9 +200,10 @@ def generate_poster():
         length = convert_standard_to_resolution(1000, image_resolution)
         cursize = convert_standard_to_resolution(55, image_resolution)
 
+        split_point = find_line_split(album_name)
         temp = []
-        temp.append(album_name[:find_line_split(album_name)].strip())
-        temp.append(album_name[find_line_split(album_name):].strip())
+        temp.append(album_name[:split_point].strip())
+        temp.append(album_name[split_point:].strip())
         album_name = temp
 
         albumnametocompare = ""
@@ -208,8 +216,8 @@ def generate_poster():
             font_name = ImageFont.truetype(BytesIO(fonts["verybold"].content), cursize)
             font_year = ImageFont.truetype(BytesIO(fonts["medium"].content), int(cursize / 2) + 5)
 
-            length = font_name.getlength(albumnametocompare) + font_year.getlength(
-                album_year) + 77
+            length = font_name.getbbox(albumnametocompare)[2] + font_year.getbbox(
+                album_year)[2] + 77
             cursize -= 1
 
     # Load static fonts
@@ -239,11 +247,11 @@ def generate_poster():
             for j in range(0, len(tracklist) - 1, linesoftracks * 2):
                 for i in range(j, j + linesoftracks):
                     try:
-                        if max < font_tracks.getlength(tracklist[i]):
-                            max = font_tracks.getlength(tracklist[i])
+                        if max < font_tracks.getbbox(tracklist[i])[2]:
+                            max = font_tracks.getbbox(tracklist[i])[2]
                     except:
                         break
-                length += max + font_times.getlength("00:00") + 30
+                length += max + font_times.getbbox("00:00")[2] + 30
         if cursize > bestsize:
             bestsize = cursize
             besttracks = tracklist
@@ -255,7 +263,8 @@ def generate_poster():
         trackheight = 0
         for i in range(0, len(tracklist) - 1):
             bbox = font_tracks.getmask(tracklist[i]).getbbox()
-            trackheight += bbox[3] - bbox[1] + 5
+            if bbox:
+                trackheight += bbox[3] - bbox[1] + 5
         if trackheight > convert_standard_to_resolution(200, image_resolution) or linesoftracks > 20:
             break
 
@@ -267,7 +276,7 @@ def generate_poster():
 
     # Put album name on image
     if twolinesforalbum:
-        posterdraw.text((convert_standard_to_resolution(65, image_resolution), convert_standard_to_resolution(725, image_resolution) - (font_name.getsize(album_name[0])[1]) + 5),
+        posterdraw.text((convert_standard_to_resolution(65, image_resolution), convert_standard_to_resolution(725, image_resolution) - (font_name.getbbox(album_name[0])[3]) + 5),
                         album_name[0],
                         font=font_name,
                         fill=(0, 0, 0),
@@ -285,13 +294,13 @@ def generate_poster():
                         anchor='ls')
     # Put the year on image
     if twolinesforalbum:
-        posterdraw.text((convert_standard_to_resolution(77, image_resolution) + font_name.getlength(albumnametocompare), convert_standard_to_resolution(725, image_resolution)),
+        posterdraw.text((convert_standard_to_resolution(77, image_resolution) + font_name.getbbox(albumnametocompare)[2], convert_standard_to_resolution(725, image_resolution)),
                         album_year,
                         font=font_year,
                         fill=(0, 0, 0),
                         anchor='ls')
     else:
-        posterdraw.text((convert_standard_to_resolution(77, image_resolution) + font_name.getlength(album_name), convert_standard_to_resolution(725, image_resolution)),
+        posterdraw.text((convert_standard_to_resolution(77, image_resolution) + font_name.getbbox(album_name)[2], convert_standard_to_resolution(725, image_resolution)),
                         album_year,
                         font=font_year,
                         fill=(0, 0, 0),
@@ -330,8 +339,8 @@ def generate_poster():
             track = not track
             if cur == "-":
                 continue
-        if font_tracks.getlength(cur) > maxlen:
-            maxlen = font_tracks.getlength(cur)
+        if font_tracks.getbbox(cur)[2] > maxlen:
+            maxlen = font_tracks.getbbox(cur)[2]
         if track:
             posterdraw.text((cury, curx),
                             cur,
