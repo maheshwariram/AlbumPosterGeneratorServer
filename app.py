@@ -6,6 +6,7 @@ import requests
 from flask import Flask, send_file
 from flask import request
 from flask_cors import CORS
+import math
 
 app = Flask(__name__)
 CORS(app)
@@ -136,29 +137,6 @@ def format_time(millis):
     return minutes + ":" + seconds
 
 
-def create_track_list(linesoftracks, response):
-    # Get the track list and track times
-    # This will create a list with 5 tracks, then those 5 tracks times (in order) and so on.
-    # Someone else try to find a better way to do this because this was all I could think of
-    tracklist = []
-    cur = 1
-    savedup = []
-    for i in response:
-        if cur > linesoftracks:
-            cur = 1
-            for x in savedup:
-                tracklist.append(x)
-            savedup = []
-        tracklist.append(remove_featured(i["trackName"]))
-        savedup.append(format_time(i["trackTimeMillis"]))
-        cur += 1
-    if len(savedup) > 0:
-        tracklist.append("-")
-        for x in savedup:
-            tracklist.append(x)
-    return tracklist
-
-
 def get_uncompressed_image(artwork_url):
     artwork_url = artwork_url.replace("https://is1-ssl.mzstatic.com/image/thumb/",
                                       "https://a5.mzstatic.com/us/r1000/0/")
@@ -180,6 +158,49 @@ def get_largest_resolution(albumart):
     # Calculate height with 3:4 ratio
     largest_height = largest_width * (4 / 3)
     return [largest_width, largest_height]
+
+
+def calculate_optimal_tracklist_layout(tracklist_data, available_width, available_height, image_resolution):
+    """
+    calculates the best number of rows and font size for the tracklist to ensure readability
+    and that all tracks fit within the available space.
+    """
+    total_tracks = len(tracklist_data)
+
+    font_size = convert_standard_to_resolution(16, image_resolution)
+    min_font_size = convert_standard_to_resolution(10, image_resolution)
+
+    while font_size >= min_font_size:
+        font = ImageFont.truetype(BytesIO(fonts["regular"].content), font_size)
+        line_height = font.getbbox("A")[3] + convert_standard_to_resolution(7, image_resolution)
+
+        if line_height <= 0:
+            font_size -= 1
+            continue
+
+        max_rows = int(available_height / line_height)
+        if max_rows == 0:
+            font_size -= 1
+            continue
+
+        num_cols = math.ceil(total_tracks / max_rows)
+        col_width = available_width / num_cols
+
+        longest_track_name = max([item['trackName'] for item in tracklist_data],
+                                 key=lambda name: font.getbbox(remove_featured(name))[2])
+
+        required_width = font.getbbox(remove_featured(longest_track_name))[2] + font.getbbox("00:00")[
+            2] + convert_standard_to_resolution(15, image_resolution)
+
+        if required_width <= col_width:
+            return max_rows, font_size
+
+        font_size -= 1
+
+    font = ImageFont.truetype(BytesIO(fonts["regular"].content), min_font_size)
+    line_height = font.getbbox("A")[3] + convert_standard_to_resolution(7, image_resolution)
+    max_rows = int(available_height / line_height)
+    return max_rows if max_rows > 0 else 1, min_font_size
 
 
 @app.route('/generate', methods=['POST'])
@@ -281,79 +302,43 @@ def generate_poster():
         right_margin,
         divider_y + convert_standard_to_resolution(5, image_resolution)], fill=(0, 0, 0))
 
-    linesoftracks = 5
-    tracklist = create_track_list(linesoftracks, album_tracklist)
+    tracklist_available_width = right_margin - left_margin
+    tracklist_available_height = image_resolution[1] - tracklist_start_y - convert_standard_to_resolution(20,
+                                                                                                          image_resolution)
 
-    bestsize = 0
-    besttracks = []
-    bestlinesoftracks = 0
+    num_rows, font_size = calculate_optimal_tracklist_layout(
+        album_tracklist, tracklist_available_width, tracklist_available_height, image_resolution
+    )
 
-    while True:
-        length = convert_standard_to_resolution(1000, image_resolution)
-        cursize = int(convert_standard_to_resolution(17, image_resolution))
-        while length > convert_standard_to_resolution(600, image_resolution):
-            cursize -= 1
-            font_tracks = ImageFont.truetype(BytesIO(fonts["regular"].content), cursize)
-            font_times = ImageFont.truetype(BytesIO(fonts["regular"].content), cursize)
-            length = 0
-            max_len = 0
-            for j in range(0, len(tracklist) - 1, linesoftracks * 2):
-                for i in range(j, j + linesoftracks):
-                    try:
-                        if max_len < font_tracks.getbbox(tracklist[i])[2]:
-                            max_len = font_tracks.getbbox(tracklist[i])[2]
-                    except:
-                        break
-                length += max_len + font_times.getbbox("00:00")[2] + 30
-        if cursize > bestsize:
-            bestsize = cursize
-            besttracks = tracklist
-            bestlinesoftracks = linesoftracks
-        linesoftracks += 1
-        tracklist = create_track_list(linesoftracks, album_tracklist)
+    font_tracks = ImageFont.truetype(BytesIO(fonts["regular"].content), font_size)
+    line_height = font_tracks.getbbox("A")[3] + convert_standard_to_resolution(7, image_resolution)
 
-        trackheight = 0
-        font_check = ImageFont.truetype(BytesIO(fonts["regular"].content), bestsize)
-        for i in range(0, len(tracklist) - 1):
-            bbox = font_check.getmask(tracklist[i]).getbbox()
-            if bbox:
-                trackheight += bbox[3] - bbox[1] + 5
-        if trackheight > (image_resolution[1] - tracklist_start_y - convert_standard_to_resolution(20,
-                                                                                                   image_resolution)) or linesoftracks > 20:
-            break
+    num_tracks = len(album_tracklist)
+    num_cols = math.ceil(num_tracks / num_rows)
+    col_width = tracklist_available_width / num_cols
 
-    # Load best font
-    font_tracks = ImageFont.truetype(BytesIO(fonts["regular"].content), bestsize)
-    font_times = ImageFont.truetype(BytesIO(fonts["regular"].content), bestsize)
-    tracklist = besttracks
-    linesoftracks = bestlinesoftracks
+    for i, track_item in enumerate(album_tracklist):
+        col = i // num_rows
+        row = i % num_rows
 
-    curline = 1
-    curx = tracklist_start_y
-    cury = int(left_margin)
-    maxlen = 0
-    track = True
+        x_pos_track = left_margin + (col * col_width)
+        x_pos_time = left_margin + ((col + 1) * col_width) - convert_standard_to_resolution(10, image_resolution)
+        y_pos = tracklist_start_y + (row * line_height)
 
-    for cur in tracklist:
-        if curline > linesoftracks or cur == "-":
-            if track:
-                cury += maxlen + int(convert_standard_to_resolution(46, image_resolution))
-            else:
-                cury += maxlen + int(convert_standard_to_resolution(15, image_resolution))
-            curx = tracklist_start_y
-            curline = 1
-            maxlen = 0
-            track = not track
-            if cur == "-":
-                continue
-        if font_tracks.getbbox(cur)[2] > maxlen:
-            maxlen = font_tracks.getbbox(cur)[2]
-        if track:
-            posterdraw.text((cury, curx), cur, font=font_tracks, fill=(0, 0, 0), anchor='ls')
-        else:
-            posterdraw.text((cury, curx), cur, font=font_times, fill=(0, 0, 0), anchor='rs')
-        curline += 1
-        curx += (int(bestsize / 2) + 5) * 2
+        track_name = remove_featured(track_item["trackName"])
+        track_time = format_time(track_item["trackTimeMillis"])
+
+        # truncate long track names
+        max_track_width = col_width - font_tracks.getbbox(track_time)[2] - convert_standard_to_resolution(15,
+                                                                                                          image_resolution)
+
+        if font_tracks.getbbox(track_name)[2] > max_track_width:
+            while font_tracks.getbbox(track_name + "...")[2] > max_track_width and len(track_name) > 0:
+                track_name = track_name[:-1]
+            track_name += "..."
+
+        posterdraw.text((x_pos_track, y_pos), track_name, font=font_tracks, fill=(0, 0, 0), anchor='ls')
+        posterdraw.text((x_pos_time, y_pos), track_time, font=font_tracks, fill=(0, 0, 0), anchor='rs')
 
     if album_copyright:
         font_copyright = ImageFont.truetype(BytesIO(fonts["light"].content),
