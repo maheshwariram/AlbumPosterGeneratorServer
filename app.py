@@ -41,6 +41,51 @@ def find_line_split(text):
         return after
 
 
+def wrap_text_dynamic(text, font, first_line_max_width, subsequent_max_width):
+    """
+    wraps text to fit a specific width, with a shorter width for the first line.
+    returns a list of lines.
+    """
+    if font.getbbox(text)[2] <= first_line_max_width:
+        return [text]
+
+    words = text.split()
+    first_line = ""
+    word_index = 0
+    for i, word in enumerate(words):
+        test_line = first_line + (" " if first_line else "") + word
+        if font.getbbox(test_line)[2] > first_line_max_width:
+            word_index = i
+            break
+        first_line = test_line
+    else:
+        word_index = len(words)
+
+    lines = [first_line]
+    remaining_text = " ".join(words[word_index:])
+
+    # now, wrap the rest of the text using the full width
+    if remaining_text:
+        remaining_lines = [remaining_text]
+        while True:
+            longest_line = max(remaining_lines, key=lambda line: font.getbbox(line)[2])
+
+            if font.getbbox(longest_line)[2] <= subsequent_max_width:
+                break
+
+            split_point = find_line_split(longest_line)
+            line1 = longest_line[:split_point].strip()
+            line2 = longest_line[split_point:].strip()
+
+            index = remaining_lines.index(longest_line)
+            remaining_lines.pop(index)
+            remaining_lines.insert(index, line1)
+            remaining_lines.insert(index + 1, line2)
+
+        lines.extend(remaining_lines)
+
+    return lines
+
 def get_colors(img):
     try:
         paletted = img.convert('P', palette=Image.ADAPTIVE, colors=5)
@@ -51,13 +96,13 @@ def get_colors(img):
             palette_index = color_counts[i][1]
             dominant_color = palette[palette_index * 3:palette_index * 3 + 3]
             colors.append(tuple(dominant_color))
-    except:
+    except (IndexError, ValueError):
         paletted = img.convert('P', palette=Image.ADAPTIVE, colors=1)
         palette = paletted.getpalette()
         color_counts = sorted(paletted.getcolors(), reverse=True)
         colors = list()
-        for i in range(1):
-            palette_index = color_counts[i][1]
+        if color_counts:
+            palette_index = color_counts[0][1]
             dominant_color = palette[palette_index * 3:palette_index * 3 + 3]
             colors.append(tuple(dominant_color))
     return colors
@@ -70,10 +115,15 @@ def serve_pil_image(pil_img):
     return send_file(img_io, mimetype='image/jpeg')
 
 
-def remove_featured(str):
-    if (str.find("(") != -1):
-        str = str.split("(")[0].strip()
-    return str
+def remove_featured(text):
+    """ explicitly checking for "feat." or "with"
+    coz some songs also have other words in the parentheses (e.g. live, remix)
+    """
+    if "(feat." in text:
+        text = text.split("(feat.")[0].strip()
+    if "(with" in text:
+        text = text.split("(with")[0].strip()
+    return text
 
 
 def format_time(millis):
@@ -109,10 +159,12 @@ def create_track_list(linesoftracks, response):
     return tracklist
 
 
-def get_uncompressed_image(artwork600):
-    artwork600 = artwork600.replace("https://is1-ssl.mzstatic.com/image/thumb/", "https://a5.mzstatic.com/us/r1000/0/")
-    artwork600 = artwork600.replace("/600x600bb.jpg", "")
-    return artwork600
+def get_uncompressed_image(artwork_url):
+    artwork_url = artwork_url.replace("https://is1-ssl.mzstatic.com/image/thumb/",
+                                      "https://a5.mzstatic.com/us/r1000/0/")
+    artwork_url = artwork_url.replace("/100x100bb.jpg", "")
+    artwork_url = artwork_url.replace("/600x600bb.jpg", "")
+    return artwork_url
 
 
 def convert_standard_to_resolution(location, resolution):
@@ -146,91 +198,92 @@ def generate_poster():
     if data["tracklist"] is None:
         return "No tracklist given", 400
 
-    # Get important details
-    album_artwork_link = get_uncompressed_image(data["artwork"].replace('100x100bb.jpg',
-                                                                        '600x600bb.jpg'))
+    album_artwork_link = get_uncompressed_image(data["artwork"])
     album_name = data["name"]
     album_year = str(data["year"])
     album_artist = data["artist"]
     album_tracklist = data["tracklist"]
-    if "copyright" in data:
-        album_copyright = data["copyright"]
-    else:
-        album_copyright = ""
+    album_copyright = data.get("copyright", "")
 
     # Open the artwork
     albumart = Image.open(BytesIO(requests.get(album_artwork_link).content))
 
     if "resolution" in data:
-        image_resolution = data["resolution"]
-        image_resolution = image_resolution.split("x")
-        image_resolution[0] = int(image_resolution[0])
-        image_resolution[1] = int(image_resolution[1])
+        image_resolution = [int(x) for x in data["resolution"].split("x")]
     else:
         image_resolution = get_largest_resolution(albumart)
 
-    # Resize the artwork to the width of the poster
-    size = image_resolution[0] - convert_standard_to_resolution(120, image_resolution)
-    albumart.thumbnail((size, size), Image.Resampling.LANCZOS)
+    art_size = image_resolution[0] - convert_standard_to_resolution(120, image_resolution)
+    albumart.thumbnail((art_size, art_size), Image.Resampling.LANCZOS)
 
     # Create a new blank image
     poster = Image.new("RGB", (int(image_resolution[0]), int(image_resolution[1])), color=(255, 255, 255))
-    # Put artwork on blank image
-    poster.paste(albumart, (int(convert_standard_to_resolution(60, image_resolution)),
-                            int(convert_standard_to_resolution(60, image_resolution))))
     posterdraw = ImageDraw.Draw(poster)
-    # Draw seperator
+
+    left_margin = convert_standard_to_resolution(60, image_resolution)
+    right_margin = convert_standard_to_resolution(660, image_resolution)
+
+    font_album = ImageFont.truetype(BytesIO(fonts["bold"].content),
+                                    convert_standard_to_resolution(35, image_resolution))
+    first_line_max_width = right_margin - left_margin - convert_standard_to_resolution(5 * 30, image_resolution)
+    full_width = right_margin - left_margin
+
+    album_name_lines = wrap_text_dynamic(album_name, font_album, first_line_max_width, full_width)
+    num_title_lines = len(album_name_lines)
+
+    album_name_y = convert_standard_to_resolution(695, image_resolution)
+
+    y_offset = 0
+    if num_title_lines > 1:
+        # if title has multiple lines, calculate the total offset
+        line_height = font_album.getbbox("A")[3]
+        line_spacing = convert_standard_to_resolution(5, image_resolution)
+        y_offset = (num_title_lines - 1) * (line_height + line_spacing)
+
+    artist_year_y = album_name_y + y_offset + convert_standard_to_resolution(30, image_resolution)
+    divider_y = artist_year_y + convert_standard_to_resolution(15, image_resolution)
+    tracklist_start_y = divider_y + convert_standard_to_resolution(30, image_resolution)
+
+    poster.paste(albumart, (int(left_margin),
+                            int(convert_standard_to_resolution(60, image_resolution))))
+
+    line_height = font_album.getbbox("A")[3]
+    line_spacing = convert_standard_to_resolution(5, image_resolution)
+    for i, line in enumerate(album_name_lines):
+        current_y = album_name_y + (i * (line_height + line_spacing))
+        posterdraw.text(
+            (left_margin, current_y),
+            line, font=font_album, fill=(0, 0, 0), anchor='ls'
+        )
+
+    artist_year_text = f"{album_artist} ({album_year})"
+    font_artist_year = ImageFont.truetype(BytesIO(fonts["semibold"].content),
+                                          convert_standard_to_resolution(20, image_resolution))
+    posterdraw.text(
+        (left_margin, artist_year_y),
+        artist_year_text, font=font_artist_year, fill=(0, 0, 0), anchor='ls'
+    )
+
+    domcolors = get_colors(albumart)
+    color_palette_x = int(right_margin)
+    rect_size = int(convert_standard_to_resolution(30, image_resolution))
+    for color in domcolors:
+        posterdraw.rectangle(
+            [(color_palette_x - rect_size, album_name_y - rect_size),
+             (color_palette_x, album_name_y)],
+            fill=color
+        )
+        color_palette_x -= rect_size
+
     posterdraw.rectangle([
-        convert_standard_to_resolution(60, image_resolution),
-        convert_standard_to_resolution(740, image_resolution),
-        convert_standard_to_resolution(660, image_resolution),
-        convert_standard_to_resolution(745, image_resolution)], fill=(0, 0, 0))
-    # Calculate font size for large album names
-    length = convert_standard_to_resolution(1000, image_resolution)
-    cursize = convert_standard_to_resolution(55, image_resolution)
-    twolinesforalbum = False
-    while length > convert_standard_to_resolution(480, image_resolution) and cursize >= convert_standard_to_resolution(25, image_resolution):
-        font_name = ImageFont.truetype(BytesIO(fonts["verybold"].content), cursize)
-        font_year = ImageFont.truetype(BytesIO(fonts["medium"].content), int(cursize / 2) + 5)
-        length = font_name.getbbox(album_name)[2] + font_year.getbbox(album_year)[2] + 77
-        cursize -= 1
+        left_margin,
+        divider_y,
+        right_margin,
+        divider_y + convert_standard_to_resolution(5, image_resolution)], fill=(0, 0, 0))
 
-    if cursize < convert_standard_to_resolution(25, image_resolution) and length > convert_standard_to_resolution(480, image_resolution):
-        twolinesforalbum = True
-        length = convert_standard_to_resolution(1000, image_resolution)
-        cursize = convert_standard_to_resolution(55, image_resolution)
-
-        split_point = find_line_split(album_name)
-        temp = []
-        temp.append(album_name[:split_point].strip())
-        temp.append(album_name[split_point:].strip())
-        album_name = temp
-
-        albumnametocompare = ""
-        if len(album_name[0]) > len(album_name[1]):
-            albumnametocompare = album_name[0]
-        else:
-            albumnametocompare = album_name[1]
-
-        while length > convert_standard_to_resolution(480, image_resolution) and cursize >= convert_standard_to_resolution(25, image_resolution):
-            font_name = ImageFont.truetype(BytesIO(fonts["verybold"].content), cursize)
-            font_year = ImageFont.truetype(BytesIO(fonts["medium"].content), int(cursize / 2) + 5)
-
-            length = font_name.getbbox(albumnametocompare)[2] + font_year.getbbox(
-                album_year)[2] + 77
-            cursize -= 1
-
-    # Load static fonts
-    font_artist = ImageFont.truetype(BytesIO(fonts["semibold"].content), convert_standard_to_resolution(25, image_resolution))
-    font_copyright = ImageFont.truetype(BytesIO(fonts["light"].content), convert_standard_to_resolution(10, image_resolution))
-
-    # Get first tracklist
     linesoftracks = 5
     tracklist = create_track_list(linesoftracks, album_tracklist)
 
-    # Extremely complicated font size calculation
-    # This is to make sure the tracklist fits on the poster with the biggest font size possible
-    # If you want to try and figure out how this works, good luck
     bestsize = 0
     besttracks = []
     bestlinesoftracks = 0
@@ -243,15 +296,15 @@ def generate_poster():
             font_tracks = ImageFont.truetype(BytesIO(fonts["regular"].content), cursize)
             font_times = ImageFont.truetype(BytesIO(fonts["regular"].content), cursize)
             length = 0
-            max = 0
+            max_len = 0
             for j in range(0, len(tracklist) - 1, linesoftracks * 2):
                 for i in range(j, j + linesoftracks):
                     try:
-                        if max < font_tracks.getbbox(tracklist[i])[2]:
-                            max = font_tracks.getbbox(tracklist[i])[2]
+                        if max_len < font_tracks.getbbox(tracklist[i])[2]:
+                            max_len = font_tracks.getbbox(tracklist[i])[2]
                     except:
                         break
-                length += max + font_times.getbbox("00:00")[2] + 30
+                length += max_len + font_times.getbbox("00:00")[2] + 30
         if cursize > bestsize:
             bestsize = cursize
             besttracks = tracklist
@@ -259,13 +312,14 @@ def generate_poster():
         linesoftracks += 1
         tracklist = create_track_list(linesoftracks, album_tracklist)
 
-        # Get height of tracklist
         trackheight = 0
+        font_check = ImageFont.truetype(BytesIO(fonts["regular"].content), bestsize)
         for i in range(0, len(tracklist) - 1):
-            bbox = font_tracks.getmask(tracklist[i]).getbbox()
+            bbox = font_check.getmask(tracklist[i]).getbbox()
             if bbox:
                 trackheight += bbox[3] - bbox[1] + 5
-        if trackheight > convert_standard_to_resolution(200, image_resolution) or linesoftracks > 20:
+        if trackheight > (image_resolution[1] - tracklist_start_y - convert_standard_to_resolution(20,
+                                                                                                   image_resolution)) or linesoftracks > 20:
             break
 
     # Load best font
@@ -274,56 +328,9 @@ def generate_poster():
     tracklist = besttracks
     linesoftracks = bestlinesoftracks
 
-    # Put album name on image
-    if twolinesforalbum:
-        posterdraw.text((convert_standard_to_resolution(65, image_resolution), convert_standard_to_resolution(725, image_resolution) - (font_name.getbbox(album_name[0])[3]) + 5),
-                        album_name[0],
-                        font=font_name,
-                        fill=(0, 0, 0),
-                        anchor='ls')
-        posterdraw.text((convert_standard_to_resolution(65, image_resolution), convert_standard_to_resolution(725, image_resolution)),
-                        album_name[1],
-                        font=font_name,
-                        fill=(0, 0, 0),
-                        anchor='ls')
-    else:
-        posterdraw.text((convert_standard_to_resolution(65, image_resolution), convert_standard_to_resolution(725, image_resolution)),
-                        album_name,
-                        font=font_name,
-                        fill=(0, 0, 0),
-                        anchor='ls')
-    # Put the year on image
-    if twolinesforalbum:
-        posterdraw.text((convert_standard_to_resolution(77, image_resolution) + font_name.getbbox(albumnametocompare)[2], convert_standard_to_resolution(725, image_resolution)),
-                        album_year,
-                        font=font_year,
-                        fill=(0, 0, 0),
-                        anchor='ls')
-    else:
-        posterdraw.text((convert_standard_to_resolution(77, image_resolution) + font_name.getbbox(album_name)[2], convert_standard_to_resolution(725, image_resolution)),
-                        album_year,
-                        font=font_year,
-                        fill=(0, 0, 0),
-                        anchor='ls')
-    # Get dominant colors
-    domcolors = get_colors(albumart)
-    # Put dominant color rectangles on poster
-    x = int(convert_standard_to_resolution(660, image_resolution))
-    rectanglesize = int(convert_standard_to_resolution(30, image_resolution))
-    for i in domcolors:
-        posterdraw.rectangle([(x - rectanglesize, convert_standard_to_resolution(670, image_resolution)), (x, convert_standard_to_resolution(670, image_resolution) + rectanglesize)],
-                             fill=(i))
-        x -= rectanglesize
-    # Put album artist on poster
-    posterdraw.text((convert_standard_to_resolution(660, image_resolution), convert_standard_to_resolution(725, image_resolution)),
-                    album_artist,
-                    font=font_artist,
-                    fill=(0, 0, 0),
-                    anchor='rs')
-    # Put the tracks onto the poster
     curline = 1
-    curx = int(convert_standard_to_resolution(775, image_resolution))
-    cury = int(convert_standard_to_resolution(60, image_resolution))
+    curx = tracklist_start_y
+    cury = int(left_margin)
     maxlen = 0
     track = True
 
@@ -333,7 +340,7 @@ def generate_poster():
                 cury += maxlen + int(convert_standard_to_resolution(46, image_resolution))
             else:
                 cury += maxlen + int(convert_standard_to_resolution(15, image_resolution))
-            curx = int(convert_standard_to_resolution(775, image_resolution))
+            curx = tracklist_start_y
             curline = 1
             maxlen = 0
             track = not track
@@ -342,27 +349,20 @@ def generate_poster():
         if font_tracks.getbbox(cur)[2] > maxlen:
             maxlen = font_tracks.getbbox(cur)[2]
         if track:
-            posterdraw.text((cury, curx),
-                            cur,
-                            font=font_tracks,
-                            fill=(0, 0, 0),
-                            anchor='ls')
+            posterdraw.text((cury, curx), cur, font=font_tracks, fill=(0, 0, 0), anchor='ls')
         else:
-            posterdraw.text((cury, curx),
-                            cur,
-                            font=font_times,
-                            fill=(0, 0, 0),
-                            anchor='rs')
+            posterdraw.text((cury, curx), cur, font=font_times, fill=(0, 0, 0), anchor='rs')
         curline += 1
-        curx += (int(cursize / 2) + 5) * 2
+        curx += (int(bestsize / 2) + 5) * 2
 
-    if album_copyright != "":
-        # Add copyright info on bottom
-        posterdraw.text((int(convert_standard_to_resolution(720, image_resolution)) / 2, int(convert_standard_to_resolution(960, image_resolution))),
-                        album_copyright,
-                        font=font_copyright,
-                        fill=(0, 0, 0),
-                        anchor='md')
+    if album_copyright:
+        font_copyright = ImageFont.truetype(BytesIO(fonts["light"].content),
+                                            convert_standard_to_resolution(10, image_resolution))
+        posterdraw.text(
+            (int(image_resolution[0] / 2),
+             int(image_resolution[1] - convert_standard_to_resolution(10, image_resolution))),
+            album_copyright, font=font_copyright, fill=(0, 0, 0), anchor='ms'
+        )
 
     return serve_pil_image(poster)
 
