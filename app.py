@@ -248,7 +248,7 @@ def calculate_optimal_tracklist_layout(tracklist_data, available_width, availabl
 
 @app.route('/generate', methods=['POST'])
 # Parameters: name, artist, year, artwork, tracklist
-# Optional: copyright, resolution
+# Optional: copyright, resolution, size_cm, dpi
 def generate_poster():
     data = request.json
     if data["name"] is None:
@@ -269,10 +269,19 @@ def generate_poster():
     album_tracklist = data["tracklist"]
     album_copyright = data.get("copyright", "")
 
-    # Open the artwork
     albumart = Image.open(BytesIO(requests.get(album_artwork_link).content))
 
-    if "resolution" in data:
+    # determine poster resolution: by cm, by pixels, or auto-detected
+    if "size_cm" in data:
+        dpi = int(data.get("dpi", 300))  # default to 300 dpi coz that's standard for printing
+        try:
+            width_cm, height_cm = map(float, data["size_cm"].split('x'))
+            width_px = int((width_cm / 2.54) * dpi)
+            height_px = int((height_cm / 2.54) * dpi)
+            image_resolution = [width_px, height_px]
+        except (ValueError, IndexError):
+            return "Invalid size_cm format. Use 'widthxheight' in cm.", 400
+    elif "resolution" in data:
         image_resolution = [int(x) for x in data["resolution"].split("x")]
     else:
         image_resolution = get_largest_resolution(albumart)
